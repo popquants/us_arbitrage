@@ -21,8 +21,8 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from plotly.offline import get_plotlyjs
 
-BASE = Path.home() / 'Documents' / 'usmart'
-COL = {'s1': '#8DB8E3', 's2': '#68D5BD', 'gross': '#A9DAB0', 'benchmark': '#E5BD61',
+BASE = Path(__file__).resolve().parents[1]
+COL = {'s1': '#8DB8E3', 's2': '#68D5BD', 'gross': '#A9DAB0', 'benchmark': '#E5BD61', 's3': '#C59DFA',
        'rich': '#E58490', 'cheap': '#68D5BD', 'muted': '#A8B8BA'}
 LAYOUT = dict(template='plotly_dark', paper_bgcolor='#0B1B1E', plot_bgcolor='#0B1B1E',
               font=dict(color='#D9E8E3', size=12), margin=dict(l=62, r=36, t=70, b=50),
@@ -49,28 +49,30 @@ def read_csv(root: Path, name: str, required: list[str]) -> pd.DataFrame:
 
 
 def get_data(root: Path):
-    d1, d2 = root/'popquants_strategy1', root/'popquants_strategy2'
-    prices = read_csv(d1, 'us_stock_adjusted_daily.csv', ['AMAT','LRCX','KLAC','TER'])
-    s1 = read_csv(d1, 'daily_backtest.csv', ['net_return'])
-    s2 = read_csv(d2, 'daily_backtest.csv', ['net_return','gross_return'])
-    agg = read_csv(d2, 'aggregate_signals.csv', list(prices.columns))
-    depth = read_csv(d2, 'depth.csv', list(prices.columns))
-    cons = read_csv(d2, 'consistency.csv', list(prices.columns))
-    tgt = read_csv(d2, 'target_weights.csv', list(prices.columns))
-    # Limit everything to actual Strategy 2 dates, same period for honest comparison.
-    ix = s2.index.intersection(s1.index).intersection(prices.index).intersection(agg.index).intersection(tgt.index)
+    # Same calendar window for all series. Only existing strategy files are read.
+    d1,d2,d3 = [root/'outputs'/f'strategy{i}' for i in (1,2,3)]
+    prices = read_csv(root/'data'/'prices','us_stock_adjusted_daily.csv',['AMAT','LRCX','KLAC','TER'])
+    s1 = read_csv(d1,'daily_backtest.csv',['net_return'])
+    s2 = read_csv(d2,'daily_backtest.csv',['net_return','gross_return'])
+    agg = read_csv(d2,'aggregate_signals.csv',list(prices.columns))
+    depth = read_csv(d2,'depth.csv',list(prices.columns))
+    cons = read_csv(d2,'consistency.csv',list(prices.columns))
+    tgt = read_csv(d2,'target_weights.csv',list(prices.columns))
+    s3 = read_csv(d3,'daily_backtest.csv',['net_return']) if (d3/'daily_backtest.csv').is_file() else None
+    ix = s1.index.intersection(s2.index).intersection(prices.index).intersection(agg.index).intersection(tgt.index)
+    if s3 is not None: ix = ix.intersection(s3.index)
+    ix = ix[(ix >= pd.Timestamp('2026-01-02')) & (ix <= pd.Timestamp('2026-11-20'))]
     if len(ix) < 60:
-        raise ValueError('Insufficient overlapping observations between the two strategy exports.')
+        raise ValueError('Need at least 60 overlapping 2026 trading days in strategy exports.')
     s1,s2,prices,agg,depth,cons,tgt = [x.loc[ix].copy() for x in (s1,s2,prices,agg,depth,cons,tgt)]
-    s1r = s1['net_return'].astype(float)
-    s2r = s2['net_return'].astype(float)
-    # Equal initial allocation, NO rebalancing, index aligned at first sample.
-    bench_eq = (prices / prices.iloc[0]).mean(axis=1)
-    bench = bench_eq.pct_change().fillna(0)
-    returns = {'Strategy 1 (net)': s1r, 'Strategy 2 (net)': s2r,
-               'Equal-weight buy & hold': bench}
+    bench_equity = (prices / prices.iloc[0]).mean(axis=1)
+    returns = {'Strategy 1 (net)':s1['net_return'].astype(float),
+               'Strategy 2 (net)':s2['net_return'].astype(float)}
+    if s3 is not None:
+        returns['Strategy 3 (net)'] = s3.loc[ix,'net_return'].astype(float)
+    returns['Equal-weight buy & hold'] = bench_equity.pct_change().fillna(0.)
     if not np.isfinite(pd.concat(returns.values(),axis=1).to_numpy()).all():
-        raise ValueError('Nonfinite daily returns in exports')
+        raise ValueError('Nonfinite daily returns found.')
     return prices,s1,s2,agg,depth,cons,tgt,returns
 
 
@@ -90,7 +92,7 @@ def metrics(r):
 def equity_fig(returns, gross):
     f=go.Figure()
     for k,r in returns.items():
-        c=COL['s1'] if k.startswith('Strategy 1') else COL['s2'] if k.startswith('Strategy 2') else COL['benchmark']
+        c=COL['s1'] if k.startswith('Strategy 1') else COL['s2'] if k.startswith('Strategy 2') else COL['s3'] if k.startswith('Strategy 3') else COL['benchmark']
         f.add_trace(go.Scatter(x=r.index,y=(1+r).cumprod(),mode='lines',name=k,line=dict(color=c,width=2)))
     f.add_trace(go.Scatter(x=gross.index,y=(1+gross).cumprod(),name='Strategy 2 (gross)',
                            line=dict(color=COL['gross'],dash='dot',width=1.4)))
@@ -102,7 +104,7 @@ def equity_fig(returns, gross):
 def drawdown_fig(returns):
     f=go.Figure()
     for k,r in returns.items():
-        e=(1+r).cumprod(); c=COL['s1'] if k.startswith('Strategy 1') else COL['s2'] if k.startswith('Strategy 2') else COL['benchmark']
+        e=(1+r).cumprod(); c=COL['s1'] if k.startswith('Strategy 1') else COL['s2'] if k.startswith('Strategy 2') else COL['s3'] if k.startswith('Strategy 3') else COL['benchmark']
         f.add_trace(go.Scatter(x=r.index,y=100*(e/e.cummax()-1),name=k,line=dict(color=c,width=2)))
     f.update_layout(**LAYOUT,title='Drawdown comparison',height=340)
     f.update_yaxes(title='Drawdown (%)')
@@ -129,6 +131,21 @@ def rolling_fig(r):
     f.update_layout(**LAYOUT,title='Strategy 2 rolling 63-day Sharpe (rf=0)',height=340)
     return f
 
+
+
+def risk_return_fig(returns):
+    f=go.Figure()
+    for name,r in returns.items():
+        m=metrics(r)
+        color = COL['s1'] if name.startswith('Strategy 1') else COL['s2'] if name.startswith('Strategy 2') else COL['s3'] if name.startswith('Strategy 3') else COL['benchmark']
+        f.add_trace(go.Scatter(x=[m['Annual vol']], y=[m['CAGR']], text=[name],
+            mode='markers+text', textposition='top center', name=name,
+            marker=dict(size=14, color=color, line=dict(color='#D9E8E3',width=1)),
+            hovertemplate='%{text}<br>Annualized standard deviation: %{x:.2f}%<br>Annualized return (CAGR): %{y:.2f}%<extra></extra>'))
+    f.update_layout(**LAYOUT, title='Annualized volatility vs annualized net return', height=370, showlegend=False)
+    f.update_xaxes(title='Annualized standard deviation (%)')
+    f.update_yaxes(title='CAGR / annualized return (%)')
+    return f
 
 def signal_explorer(prices,agg,depth,cons,tgt):
     """One dropdown controls stock price, aggregate score, and actual target/held weight.
@@ -210,7 +227,7 @@ def position_changes_html(tgt: pd.DataFrame) -> str:
     if not rows:
         return '<p>No target position changes in this sample.</p>'
     body=''.join('<tr>'+''.join('<td>'+html.escape(str(v))+'</td>' for v in (d,t,a,f'{old:+.2f}',f'{new:+.2f}'))+'</tr>'
-                 for d,t,a,old,new in rows[-150:][::-1])
+                 for d,t,a,old,new in rows[::-1])
     return '<table><thead><tr><th>Decision date</th><th>Ticker</th><th>Event</th><th>Previous target</th><th>New target</th></tr></thead><tbody>'+body+'</tbody></table>'
 
 
@@ -219,7 +236,7 @@ def plot_html(fig):
 
 
 def main():
-    p=argparse.ArgumentParser(description='PopQuants visual dashboard V3. Reads cached Strategy 1+2 CSVs only.')
+    p=argparse.ArgumentParser(description='PopQuants visual dashboard V3. Reads cached Strategy 1–3 CSVs only.')
     p.add_argument('--root',type=Path,default=BASE)
     p.add_argument('--no-open',action='store_true')
     a=p.parse_args()
@@ -230,7 +247,7 @@ def main():
           ('rolling',rolling_fig(returns['Strategy 2 (net)']))]
     nav=''.join(f'<a href="#{name}">{name.title()}</a>' for name,_ in figs) + '<a href="#trades">Position changes</a>'
     blocks=''.join(f'<section class="card" id="{name}">{plot_html(fig)}</section>' for name,fig in figs)
-    blocks += '<section class="card" id="trades"><h2>Target position changes (model decisions, not fills)</h2><div class="table-wrap">' + position_changes_html(tgt) + '</div></section>'
+    blocks += '<section class="card" id="trades"><h2>Target position changes (model decisions, not fills)</h2><div class="position-table-wrap">' + position_changes_html(tgt) + '</div></section>'
     page='''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>PopQuants — Interactive Tear Sheet</title><style>
 *{box-sizing:border-box}body{margin:0;background:#071416;color:#D9E8E3;font:15px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
@@ -238,22 +255,22 @@ header{padding:30px 4vw;border-bottom:1px solid #284144}h1{margin:4px 0 9px;font
 main{max-width:1480px;margin:auto;padding:24px 3vw}h2{font-size:18px}.muted{color:#9FB8B5}
 .card{border:1px solid #284144;border-radius:13px;padding:12px;margin-bottom:22px;background:#0B1B1E;overflow:hidden}
 a{color:#90D7C6;text-decoration:none}nav{display:flex;flex-wrap:wrap;gap:20px;margin-top:16px}
-.table-wrap{overflow-x:auto}table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+.table-wrap{overflow-x:auto}.position-table-wrap{max-height:495px;overflow:auto;overscroll-behavior:contain}.position-table-wrap thead th{position:sticky;top:0;background:#193034;z-index:2}table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
 th,td{padding:12px;border-bottom:1px solid #284144;text-align:right;white-space:nowrap}th:first-child,td:first-child{text-align:left}
 .note{padding:15px 18px;border-left:3px solid #E5BD61;background:#132A2D;line-height:1.6;font-size:13px}
 /* Protect users from the promotional Plotly brand link, including old/embedded modebar variants */
 .modebar-btn.plotlyjsicon,.modebar .logo,.modebar a[data-title*="Produced with Plotly"],.modebar [data-title*="Produced with Plotly"]{display:none!important}
 </style><script>__PLOTLY_JS__</script></head><body>
-<header><div class="muted">POPQUANTS · RESEARCH LAB</div><h1>Interactive Tear Sheet — Strategies 1 &amp; 2</h1>
-<div class="muted">Offline report · Same aligned date range · Equal-weight buy &amp; hold benchmark · Strategy 3 pending</div>
-<nav>__NAV__</nav></header><main><section class="card"><h2>Performance comparison</h2><div class="table-wrap">__TABLE__</div></section>
+<header><div class="muted">POPQUANTS · RESEARCH LAB</div><h1>Interactive Tear Sheet — Strategies 1–3</h1>
+<div class="muted">Offline report · Same aligned date range · Equal-weight buy &amp; hold benchmark · Strategy 3 shown when completed</div>
+<nav>__NAV__</nav></header><main><section class="card"><h2>Performance comparison</h2><div class="table-wrap">__TABLE__</div><div style="margin-top:18px">__RISK_RETURN__</div></section>
 <section class="card"><div class="note">Strategy calculations are read from the existing CSVs. No strategy file was modified.
 Signals: target decisions at close t; held positions approximated from t+1. Position markers are model decisions, NOT broker fills.
 Price series are broker-adjusted research data, check currency. Equal-weight benchmark is 25% each AMAT/LRCX/KLAC/TER initially, long-only with no rebalancing and no modeled costs.
 Strategy 2 is the four-stock educational prototype, not the published 13F or 50-stock strategy. 5 bps model cost excludes borrow, financing and dividends.</div></section>
 __BLOCKS__<div class="muted" style="padding:20px">PopQuants research education · Read-only cached local CSV · Plotly offline</div></main></body></html>'''
-    page=page.replace('__PLOTLY_JS__',get_plotlyjs()).replace('__NAV__',nav).replace('__TABLE__',scorecard(returns)).replace('__BLOCKS__',blocks)
-    out=root/'popquants_tearsheets'
+    page=page.replace('__PLOTLY_JS__',get_plotlyjs()).replace('__NAV__',nav).replace('__TABLE__',scorecard(returns)).replace('__RISK_RETURN__',plot_html(risk_return_fig(returns))).replace('__BLOCKS__',blocks)
+    out=root/'outputs'/'dashboard'
     out.mkdir(parents=True,exist_ok=True)
     path=out/'interactive_tearsheet.html'
     path.write_text(page,encoding='utf-8')
