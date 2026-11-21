@@ -1,0 +1,25 @@
+# Secrets and local data — never commit
+config/local/*
+!config/local/README.txt
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.log
+.venv/
+venv/
+__pycache__/
+.ipynb_checkpoints/
+*.pyc
+.DS_Store
+
+# SEC archives, historical market data, backtest outputs
+data/**/*.csv
+data/**/*.parquet
+data/**/*.feather
+data/**/*.zip
+outputs/**
+!outputs/README.txt
