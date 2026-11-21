@@ -439,7 +439,7 @@ def execute(args):
     mask=(daily.index>=max(first,start)) & (daily.index<=end)
     if mask.sum()<60:raise RuntimeError('Fewer than 60 test bars after first valid SEC embedding model; no robust tear sheet.')
     prices,daily,agg,depth,cons,tgt=[x.loc[mask] for x in (prices,daily,agg,depth,cons,tgt)]
-    outdir=root/'popquants_strategy3_real13f_2026' if args.start=='2026-01-01' else root/'popquants_strategy3_real13f_custom'
+    outdir=root/'outputs'/'strategy3'
     stats,output=report(outdir,prices,daily,agg,depth,cons,tgt,pairdf,coverage,audit,'SEC_13F_PIT_WORD2VEC_2026')
     pd.DataFrame(embedding_frames).to_csv(outdir/'embedding_3d_pca.csv',index=False)
     write_education_tearsheet(outdir,prices,daily,agg,depth,cons,tgt,stats)
