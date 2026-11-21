@@ -1,0 +1,28 @@
+{
+  "workshop_name": "PopQuants US Stocks Quant Workshop",
+  "evaluation_start": "2026-01-02",
+  "evaluation_end": "2026-11-20",
+  "universe": [
+    "AMAT",
+    "LRCX",
+    "KLAC",
+    "TER"
+  ],
+  "pairs_strategy": [
+    "AMAT",
+    "LRCX"
+  ],
+  "rolling_window_days": 60,
+  "entry_z": 2,
+  "exit_z": 0.5,
+  "one_way_cost_bps": 5,
+  "strategy2_min_depth": 2,
+  "strategy2_min_consistency": 0.5,
+  "strategy3_embedding_dimensions": 48,
+  "strategy3_top_k": 20,
+  "strategy3_min_depth": 1,
+  "strategy3_min_consistency": 0.5,
+  "phone_country_code_hint": "66",
+  "broker_account": "OWN_ACCOUNT_ONLY",
+  "note": "No credentials, phone number, account ID, or API code is embedded. Learners must provide their own in config/local/."
+}
